@@ -1,0 +1,43 @@
+name: Protect main
+
+# 當有 PR 要合併進 main（或 master）時觸發
+on:
+  pull_request:
+    branches:
+      - main
+      - master
+
+jobs:
+  block-develop-branches:
+    name: Block branches from develop
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (full history)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check source branch
+        env:
+          HEAD_REF: ${{ github.head_ref }}
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          set -e
+          git fetch origin develop "$BASE_REF"
+
+          # 1. develop 本身不能直接合併進 main
+          if [ "$HEAD_REF" = "develop" ]; then
+            echo "::error::develop 分支不能直接合併進 $BASE_REF"
+            exit 1
+          fi
+
+          # 2. 判斷 PR 分支是否從 develop 開出來：
+          #    若 PR 分支包含「在 develop 上、但不在 main 上」的 commit，
+          #    代表它是從 develop 分出來的 → 擋下
+          FORK_POINT=$(git merge-base HEAD origin/develop)
+          if ! git merge-base --is-ancestor "$FORK_POINT" "origin/$BASE_REF"; then
+            echo "::error::分支 '$HEAD_REF' 是從 develop 開出來的，不允許合併進 $BASE_REF"
+            exit 1
+          fi
+
+          echo "✅ 分支 '$HEAD_REF' 不是從 develop 開出，允許合併"
